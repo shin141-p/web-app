@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Go Game - Shared</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
+    <style>
+        body {
+            background-color: #f3f4f6;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            touch-action: manipulation;
+        }
+        .goban {
+            background-color: #dbb06d;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            position: relative;
+            aspect-ratio: 1 / 1;
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            grid-template-rows: repeat(9, 1fr);
+        }
+        .intersection {
+            position: relative;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .intersection::before, .intersection::after {
+            content: '';
+            position: absolute;
+            background-color: #4a3728;
+            z-index: 0;
+        }
+        .intersection::before { width: 100%; height: 1px; top: 50%; left: 0; }
+        .intersection::after { width: 1px; height: 100%; top: 0; left: 50%; }
+        .edge-top::after { height: 50%; top: 50%; }
+        .edge-bottom::after { height: 50%; top: 0; }
+        .edge-left::before { width: 50%; left: 50%; }
+        .edge-right::before { width: 50%; left: 0; }
+
+        .stone {
+            width: 90%;
+            height: 90%;
+            border-radius: 50%;
+            z-index: 10;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .black-stone {
+            background: radial-gradient(circle at 30% 30%, #444, #000);
+            box-shadow: 2px 2px 4px rgba(0,0,0,0.4);
+        }
+        .white-stone {
+            background: radial-gradient(circle at 30% 30%, #fff, #ccc);
+            box-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            border: 1px solid #ddd;
+        }
+        .hoshi {
+            width: 6px;
+            height: 6px;
+            background-color: #4a3728;
+            border-radius: 50%;
+            position: absolute;
+            z-index: 5;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        .loading-overlay {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div id="loading" class="fixed inset-0 z-[100] flex items-center justify-center loading-overlay">
+        <div class="text-center">
+            <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent"></div>
+            <p class="mt-4 font-bold text-gray-700">読み込み中...</p>
+        </div>
+    </div>
+
+    <div class="max-w-md w-full text-center space-y-4">
+        <div class="flex justify-between items-end">
+            <div class="text-left">
+                <h1 class="text-2xl font-bold text-gray-800 leading-tight">囲碁 9x9</h1>
+                <p id="game-id-display" class="text-[10px] text-gray-400 font-mono"></p>
+            </div>
+            <button id="share-btn" class="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-full shadow-lg hover:bg-blue-700 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                共有用リンクをコピー
+            </button>
+        </div>
+
+        <!-- Status Panel -->
+        <div class="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+            <div class="flex flex-col items-center w-24">
+                <div class="w-6 h-6 black-stone rounded-full mb-1"></div>
+                <span class="text-[10px] font-bold text-gray-500">黒 (先手)</span>
+                <span id="black-score" class="text-xl font-mono font-bold">0</span>
+            </div>
+            
+            <div id="turn-indicator" class="text-center">
+                <div class="px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300" id="turn-text">読み込み中...</div>
+            </div>
+
+            <div class="flex flex-col items-center w-24">
+                <div class="w-6 h-6 white-stone rounded-full mb-1"></div>
+                <span class="text-[10px] font-bold text-gray-500">白 (後手)</span>
+                <span id="white-score" class="text-xl font-mono font-bold">0</span>
+            </div>
+        </div>
+
+        <!-- Board -->
+        <div id="board" class="goban rounded-sm border-2 border-[#4a3728] w-full mx-auto select-none"></div>
+
+        <!-- Controls -->
+        <div class="flex gap-2 justify-center">
+            <button id="pass-btn" class="px-8 py-2.5 bg-white border border-gray-300 rounded-xl shadow-sm hover:bg-gray-50 active:scale-95 transition-all text-sm font-bold">パス</button>
+            <button id="reset-btn" class="px-8 py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl shadow-sm hover:bg-red-100 active:scale-95 transition-all text-sm font-bold">リセット</button>
+        </div>
+
+        <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full text-sm font-bold opacity-0 transition-opacity pointer-events-none z-[100]">
+            リンクをコピーしました！
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="modal" class="hidden fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-xs w-full text-center">
+            <p id="modal-text" class="text-lg font-bold mb-6 text-gray-800"></p>
+            <button id="modal-close" class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors">とじる</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Firebase Configuration ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'igo-demo-app';
+        const firebaseConfig = JSON.parse(__firebase_config);
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // --- Game Constants & State ---
+        const BOARD_SIZE = 9;
+        let gameId = new URLSearchParams(window.location.search).get('gameId');
+        let gameState = {
+            board: Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null)),
+            currentPlayer: 'black',
+            capturedByBlack: 0,
+            capturedByWhite: 0,
+            passCount: 0,
+            lastUpdate: Date.now()
+        };
+
+        // --- UI Elements ---
+        const boardEl = document.getElementById('board');
+        const turnText = document.getElementById('turn-text');
+        const blackScoreEl = document.getElementById('black-score');
+        const whiteScoreEl = document.getElementById('white-score');
+        const loadingEl = document.getElementById('loading');
+        const shareBtn = document.getElementById('share-btn');
+        const passBtn = document.getElementById('pass-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const toast = document.getElementById('toast');
+        const modal = document.getElementById('modal');
+        const modalText = document.getElementById('modal-text');
+        const modalClose = document.getElementById('modal-close');
+        const gameIdDisplay = document.getElementById('game-id-display');
+
+        // --- Core Functions ---
+
+        async function init() {
+            try {
+                // Auth Rule 3
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await auth.signInWithCustomToken(__initial_auth_token);
+                } else {
+                    await auth.signInAnonymously();
+                }
+
+                if (!gameId) {
+                    gameId = Math.random().toString(36).substring(2, 10);
+                    const newUrl = new URL(window.location);
+                    newUrl.searchParams.set('gameId', gameId);
+                    window.history.replaceState({}, '', newUrl);
+                }
+                gameIdDisplay.innerText = `Room: ${gameId}`;
+
+                setupBoardUI();
+                listenToGame();
+            } catch (err) {
+                console.error(err);
+                showModal('初期化に失敗しました。再読み込みしてください。');
+            }
+        }
+
+        function setupBoardUI() {
+            boardEl.innerHTML = '';
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const intersection = document.createElement('div');
+                    intersection.className = 'intersection';
+                    if (r === 0) intersection.classList.add('edge-top');
+                    if (r === BOARD_SIZE - 1) intersection.classList.add('edge-bottom');
+                    if (c === 0) intersection.classList.add('edge-left');
+                    if (c === BOARD_SIZE - 1) intersection.classList.add('edge-right');
+
+                    if ((r === 2 || r === 4 || r === 6) && (c === 2 || c === 4 || c === 6)) {
+                        const hoshi = document.createElement('div');
+                        hoshi.className = 'hoshi';
+                        intersection.appendChild(hoshi);
+                    }
+
+                    intersection.onclick = () => handleMove(r, c);
+                    intersection.dataset.row = r;
+                    intersection.dataset.col = c;
+                    boardEl.appendChild(intersection);
+                }
+            }
+        }
+
+        function listenToGame() {
+            const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('games').doc(gameId);
+            
+            docRef.onSnapshot((doc) => {
+                loadingEl.classList.add('hidden');
+                if (doc.exists) {
+                    const data = doc.data();
+                    // Deserialize board
+                    gameState = {
+                        ...data,
+                        board: JSON.parse(data.boardJson)
+                    };
+                    render();
+                } else {
+                    // Create game if not exists
+                    saveGame();
+                }
+            }, (error) => {
+                console.error("Firestore sync error:", error);
+                showModal('データの取得に失敗しました。');
+            });
+        }
+
+        async function saveGame() {
+            if (!auth.currentUser) return;
+            const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('games').doc(gameId);
+            
+            await docRef.set({
+                boardJson: JSON.stringify(gameState.board),
+                currentPlayer: gameState.currentPlayer,
+                capturedByBlack: gameState.capturedByBlack,
+                capturedByWhite: gameState.capturedByWhite,
+                passCount: gameState.passCount,
+                lastUpdate: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        }
+
+        function handleMove(r, c) {
+            if (gameState.board[r][c] !== null) return;
+
+            // Clone board for logic
+            const tempBoard = JSON.parse(JSON.stringify(gameState.board));
+            tempBoard[r][c] = gameState.currentPlayer;
+            
+            const opponent = gameState.currentPlayer === 'black' ? 'white' : 'black';
+            
+            // 1. Captures
+            const captured = findCapturesOnBoard(tempBoard, opponent);
+            
+            // 2. Suicide Check
+            if (captured.length === 0) {
+                const group = getGroupFromBoard(tempBoard, r, c, gameState.currentPlayer);
+                if (getLibertiesFromBoard(tempBoard, group).length === 0) {
+                    showModal('着手禁止点です。');
+                    return;
+                }
+            }
+
+            // Valid Move: Apply to real state
+            gameState.board = tempBoard;
+            captured.forEach(([cr, cc]) => {
+                gameState.board[cr][cc] = null;
+            });
+
+            if (gameState.currentPlayer === 'black') gameState.capturedByBlack += captured.length;
+            else gameState.capturedByWhite += captured.length;
+
+            gameState.currentPlayer = opponent;
+            gameState.passCount = 0;
+
+            saveGame();
+        }
+
+        function findCapturesOnBoard(boardRef, targetColor) {
+            let captured = [];
+            const visited = new Set();
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (boardRef[r][c] === targetColor && !visited.has(`${r},${c}`)) {
+                        const group = getGroupFromBoard(boardRef, r, c, targetColor);
+                        group.forEach(([gr, gc]) => visited.add(`${gr},${gc}`));
+                        if (getLibertiesFromBoard(boardRef, group).length === 0) {
+                            captured = captured.concat(group);
+                        }
+                    }
+                }
+            }
+            return captured;
+        }
+
+        function getGroupFromBoard(boardRef, r, c, color) {
+            const group = [];
+            const visited = new Set();
+            const stack = [[r, c]];
+            while (stack.length > 0) {
+                const [currR, currC] = stack.pop();
+                const key = `${currR},${currC}`;
+                if (visited.has(key) || boardRef[currR][currC] !== color) continue;
+                visited.add(key);
+                group.push([currR, currC]);
+                [[currR-1, currC], [currR+1, currC], [currR, currC-1], [currR, currC+1]].forEach(([nr, nc]) => {
+                    if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) stack.push([nr, nc]);
+                });
+            }
+            return group;
+        }
+
+        function getLibertiesFromBoard(boardRef, group) {
+            const libs = new Set();
+            group.forEach(([r, c]) => {
+                [[r-1, c], [r+1, c], [r, c-1], [r, c+1]].forEach(([nr, nc]) => {
+                    if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && boardRef[nr][nc] === null) {
+                        libs.add(`${nr},${nc}`);
+                    }
+                });
+            });
+            return Array.from(libs);
+        }
+
+        function render() {
+            // Update Board
+            const cells = boardEl.children;
+            for (let i = 0; i < cells.length; i++) {
+                const r = parseInt(cells[i].dataset.row);
+                const c = parseInt(cells[i].dataset.col);
+                const existing = cells[i].querySelector('.stone');
+                if (existing) existing.remove();
+
+                if (gameState.board[r][c]) {
+                    const stone = document.createElement('div');
+                    stone.className = `stone ${gameState.board[r][c]}-stone`;
+                    cells[i].appendChild(stone);
+                }
+            }
+
+            // Update UI
+            blackScoreEl.innerText = gameState.capturedByBlack;
+            whiteScoreEl.innerText = gameState.capturedByWhite;
+
+            if (gameState.currentPlayer === 'black') {
+                turnText.innerText = '黒の番';
+                turnText.className = 'px-4 py-1.5 rounded-full text-xs font-bold bg-black text-white shadow-md ring-2 ring-black ring-offset-2';
+            } else {
+                turnText.innerText = '白の番';
+                turnText.className = 'px-4 py-1.5 rounded-full text-xs font-bold bg-white text-black border border-gray-300 shadow-md ring-2 ring-gray-200 ring-offset-2';
+            }
+        }
+
+        // --- Interaction Handlers ---
+
+        shareBtn.onclick = () => {
+            const url = window.location.href;
+            const tempInput = document.createElement('input');
+            tempInput.value = url;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+            
+            toast.style.opacity = '1';
+            setTimeout(() => toast.style.opacity = '0', 2000);
+        };
+
+        passBtn.onclick = () => {
+            gameState.passCount++;
+            if (gameState.passCount >= 2) {
+                showModal('終局しました。');
+            } else {
+                gameState.currentPlayer = gameState.currentPlayer === 'black' ? 'white' : 'black';
+                saveGame();
+            }
+        };
+
+        resetBtn.onclick = () => {
+            if (confirm('盤面をリセットしますか？')) {
+                gameState = {
+                    board: Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null)),
+                    currentPlayer: 'black',
+                    capturedByBlack: 0,
+                    capturedByWhite: 0,
+                    passCount: 0,
+                    lastUpdate: Date.now()
+                };
+                saveGame();
+            }
+        };
+
+        function showModal(text) {
+            modalText.innerText = text;
+            modal.classList.remove('hidden');
+        }
+
+        modalClose.onclick = () => modal.classList.add('hidden');
+
+        // Start App
+        init();
+    </script>
+</body>
+</html>
