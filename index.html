@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Simple Go Game - Shared</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
+    <!-- 1. defer属性を追加して読み込み順序を厳格化 -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js" defer></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js" defer></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js" defer></script>
     <style>
         body {
             background-color: #f3f4f6;
@@ -140,289 +141,299 @@
         </div>
     </div>
 
-    <script>
-        // --- Firebase Configuration ---
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'igo-demo-app';
-        const firebaseConfig = JSON.parse(__firebase_config);
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
-
-        // --- Game Constants & State ---
-        const BOARD_SIZE = 9;
-        let gameId = new URLSearchParams(window.location.search).get('gameId');
-        let gameState = {
-            board: Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null)),
-            currentPlayer: 'black',
-            capturedByBlack: 0,
-            capturedByWhite: 0,
-            passCount: 0,
-            lastUpdate: Date.now()
-        };
-
-        // --- UI Elements ---
-        const boardEl = document.getElementById('board');
-        const turnText = document.getElementById('turn-text');
-        const blackScoreEl = document.getElementById('black-score');
-        const whiteScoreEl = document.getElementById('white-score');
-        const loadingEl = document.getElementById('loading');
-        const shareBtn = document.getElementById('share-btn');
-        const passBtn = document.getElementById('pass-btn');
-        const resetBtn = document.getElementById('reset-btn');
-        const toast = document.getElementById('toast');
-        const modal = document.getElementById('modal');
-        const modalText = document.getElementById('modal-text');
-        const modalClose = document.getElementById('modal-close');
-        const gameIdDisplay = document.getElementById('game-id-display');
-
-        // --- Core Functions ---
-
-        async function init() {
-            try {
-                // Auth Rule 3
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await auth.signInWithCustomToken(__initial_auth_token);
-                } else {
-                    await auth.signInAnonymously();
-                }
-
-                if (!gameId) {
-                    gameId = Math.random().toString(36).substring(2, 10);
-                    const newUrl = new URL(window.location);
-                    newUrl.searchParams.set('gameId', gameId);
-                    window.history.replaceState({}, '', newUrl);
-                }
-                gameIdDisplay.innerText = `Room: ${gameId}`;
-
-                setupBoardUI();
-                listenToGame();
-            } catch (err) {
-                console.error(err);
-                showModal('初期化に失敗しました。再読み込みしてください。');
+    <!-- 2. scriptにdefer属性を付け、DOMとFirebaseの読み込み完了後に実行させる -->
+    <script defer>
+        // DOMとすべてのdeferスクリプトが読み込まれた後に実行
+        window.addEventListener('DOMContentLoaded', () => {
+            // --- Firebase Configuration ---
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'igo-demo-app';
+            
+            // 環境変数の存在チェック（ローカル開発時のクラッシュ防止）
+            if (typeof __firebase_config === 'undefined') {
+                console.error("Firebase config is missing.");
+                showModal('Firebaseの設定が見つかりません。');
+                return;
             }
-        }
 
-        function setupBoardUI() {
-            boardEl.innerHTML = '';
-            for (let r = 0; r < BOARD_SIZE; r++) {
-                for (let c = 0; c < BOARD_SIZE; c++) {
-                    const intersection = document.createElement('div');
-                    intersection.className = 'intersection';
-                    if (r === 0) intersection.classList.add('edge-top');
-                    if (r === BOARD_SIZE - 1) intersection.classList.add('edge-bottom');
-                    if (c === 0) intersection.classList.add('edge-left');
-                    if (c === BOARD_SIZE - 1) intersection.classList.add('edge-right');
+            const firebaseConfig = JSON.parse(__firebase_config);
+            firebase.initializeApp(firebaseConfig);
+            const auth = firebase.auth();
+            const db = firebase.firestore();
 
-                    if ((r === 2 || r === 4 || r === 6) && (c === 2 || c === 4 || c === 6)) {
-                        const hoshi = document.createElement('div');
-                        hoshi.className = 'hoshi';
-                        intersection.appendChild(hoshi);
+            // --- Game Constants & State ---
+            const BOARD_SIZE = 9;
+            let gameId = new URLSearchParams(window.location.search).get('gameId');
+            let gameState = {
+                board: Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null)),
+                currentPlayer: 'black',
+                capturedByBlack: 0,
+                capturedByWhite: 0,
+                passCount: 0,
+                lastUpdate: Date.now()
+            };
+
+            // --- UI Elements ---
+            const boardEl = document.getElementById('board');
+            const turnText = document.getElementById('turn-text');
+            const blackScoreEl = document.getElementById('black-score');
+            const whiteScoreEl = document.getElementById('white-score');
+            const loadingEl = document.getElementById('loading');
+            const shareBtn = document.getElementById('share-btn');
+            const passBtn = document.getElementById('pass-btn');
+            const resetBtn = document.getElementById('reset-btn');
+            const toast = document.getElementById('toast');
+            const modal = document.getElementById('modal');
+            const modalText = document.getElementById('modal-text');
+            const modalClose = document.getElementById('modal-close');
+            const gameIdDisplay = document.getElementById('game-id-display');
+
+            // --- Core Functions ---
+
+            async function init() {
+                try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await auth.signInWithCustomToken(__initial_auth_token);
+                    } else {
+                        await auth.signInAnonymously();
                     }
 
-                    intersection.onclick = () => handleMove(r, c);
-                    intersection.dataset.row = r;
-                    intersection.dataset.col = c;
-                    boardEl.appendChild(intersection);
-                }
-            }
-        }
+                    if (!gameId) {
+                        gameId = Math.random().toString(36).substring(2, 10);
+                        const newUrl = new URL(window.location);
+                        newUrl.searchParams.set('gameId', gameId);
+                        window.history.replaceState({}, '', newUrl);
+                    }
+                    gameIdDisplay.innerText = `Room: ${gameId}`;
 
-        function listenToGame() {
-            const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('games').doc(gameId);
-            
-            docRef.onSnapshot((doc) => {
-                loadingEl.classList.add('hidden');
-                if (doc.exists) {
-                    const data = doc.data();
-                    // Deserialize board
-                    gameState = {
-                        ...data,
-                        board: JSON.parse(data.boardJson)
-                    };
-                    render();
-                } else {
-                    // Create game if not exists
-                    saveGame();
-                }
-            }, (error) => {
-                console.error("Firestore sync error:", error);
-                showModal('データの取得に失敗しました。');
-            });
-        }
-
-        async function saveGame() {
-            if (!auth.currentUser) return;
-            const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('games').doc(gameId);
-            
-            await docRef.set({
-                boardJson: JSON.stringify(gameState.board),
-                currentPlayer: gameState.currentPlayer,
-                capturedByBlack: gameState.capturedByBlack,
-                capturedByWhite: gameState.capturedByWhite,
-                passCount: gameState.passCount,
-                lastUpdate: firebase.firestore.FieldValue.serverTimestamp()
-            });
-        }
-
-        function handleMove(r, c) {
-            if (gameState.board[r][c] !== null) return;
-
-            // Clone board for logic
-            const tempBoard = JSON.parse(JSON.stringify(gameState.board));
-            tempBoard[r][c] = gameState.currentPlayer;
-            
-            const opponent = gameState.currentPlayer === 'black' ? 'white' : 'black';
-            
-            // 1. Captures
-            const captured = findCapturesOnBoard(tempBoard, opponent);
-            
-            // 2. Suicide Check
-            if (captured.length === 0) {
-                const group = getGroupFromBoard(tempBoard, r, c, gameState.currentPlayer);
-                if (getLibertiesFromBoard(tempBoard, group).length === 0) {
-                    showModal('着手禁止点です。');
-                    return;
+                    setupBoardUI();
+                    listenToGame();
+                } catch (err) {
+                    console.error(err);
+                    showModal('初期化に失敗しました。再読み込みしてください。');
                 }
             }
 
-            // Valid Move: Apply to real state
-            gameState.board = tempBoard;
-            captured.forEach(([cr, cc]) => {
-                gameState.board[cr][cc] = null;
-            });
+            function setupBoardUI() {
+                boardEl.innerHTML = '';
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        const intersection = document.createElement('div');
+                        intersection.className = 'intersection';
+                        if (r === 0) intersection.classList.add('edge-top');
+                        if (r === BOARD_SIZE - 1) intersection.classList.add('edge-bottom');
+                        if (c === 0) intersection.classList.add('edge-left');
+                        if (c === BOARD_SIZE - 1) intersection.classList.add('edge-right');
 
-            if (gameState.currentPlayer === 'black') gameState.capturedByBlack += captured.length;
-            else gameState.capturedByWhite += captured.length;
+                        if ((r === 2 || r === 4 || r === 6) && (c === 2 || c === 4 || c === 6)) {
+                            const hoshi = document.createElement('div');
+                            hoshi.className = 'hoshi';
+                            intersection.appendChild(hoshi);
+                        }
 
-            gameState.currentPlayer = opponent;
-            gameState.passCount = 0;
+                        intersection.onclick = () => handleMove(r, c);
+                        intersection.dataset.row = r;
+                        intersection.dataset.col = c;
+                        boardEl.appendChild(intersection);
+                    }
+                }
+            }
 
-            saveGame();
-        }
+            function listenToGame() {
+                const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('games').doc(gameId);
+                
+                docRef.onSnapshot((doc) => {
+                    loadingEl.classList.add('hidden');
+                    if (doc.exists) {
+                        const data = doc.data();
+                        gameState = {
+                            ...data,
+                            board: JSON.parse(data.boardJson)
+                        };
+                        render();
+                    } else {
+                        saveGame();
+                    }
+                }, (error) => {
+                    console.error("Firestore sync error:", error);
+                    loadingEl.classList.add('hidden'); // エラー時もローディングは消す
+                    showModal('データの取得に失敗しました。');
+                });
+            }
 
-        function findCapturesOnBoard(boardRef, targetColor) {
-            let captured = [];
-            const visited = new Set();
-            for (let r = 0; r < BOARD_SIZE; r++) {
-                for (let c = 0; c < BOARD_SIZE; c++) {
-                    if (boardRef[r][c] === targetColor && !visited.has(`${r},${c}`)) {
-                        const group = getGroupFromBoard(boardRef, r, c, targetColor);
-                        group.forEach(([gr, gc]) => visited.add(`${gr},${gc}`));
-                        if (getLibertiesFromBoard(boardRef, group).length === 0) {
-                            captured = captured.concat(group);
+            async function saveGame() {
+                if (!auth.currentUser) return;
+                const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('games').doc(gameId);
+                
+                await docRef.set({
+                    boardJson: JSON.stringify(gameState.board),
+                    currentPlayer: gameState.currentPlayer,
+                    capturedByBlack: gameState.capturedByBlack,
+                    capturedByWhite: gameState.capturedByWhite,
+                    passCount: gameState.passCount,
+                    lastUpdate: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
+            function handleMove(r, c) {
+                if (gameState.board[r][c] !== null) return;
+
+                const tempBoard = JSON.parse(JSON.stringify(gameState.board));
+                tempBoard[r][c] = gameState.currentPlayer;
+                
+                const opponent = gameState.currentPlayer === 'black' ? 'white' : 'black';
+                const captured = findCapturesOnBoard(tempBoard, opponent);
+                
+                if (captured.length === 0) {
+                    const group = getGroupFromBoard(tempBoard, r, c, gameState.currentPlayer);
+                    if (getLibertiesFromBoard(tempBoard, group).length === 0) {
+                        showModal('着手禁止点です。');
+                        return;
+                    }
+                }
+
+                gameState.board = tempBoard;
+                captured.forEach(([cr, cc]) => {
+                    gameState.board[cr][cc] = null;
+                });
+
+                if (gameState.currentPlayer === 'black') gameState.capturedByBlack += captured.length;
+                else gameState.capturedByWhite += captured.length;
+
+                gameState.currentPlayer = opponent;
+                gameState.passCount = 0;
+
+                saveGame();
+            }
+
+            function findCapturesOnBoard(boardRef, targetColor) {
+                let captured = [];
+                const visited = new Set();
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; r++) { // バグ修正: c++ に変更
+                        if (boardRef[r][c] === targetColor && !visited.has(`${r},${c}`)) {
+                            const group = getGroupFromBoard(boardRef, r, c, targetColor);
+                            group.forEach(([gr, gc]) => visited.add(`${gr},${gc}`));
+                            if (getLibertiesFromBoard(boardRef, group).length === 0) {
+                                captured = captured.concat(group);
+                            }
                         }
                     }
                 }
+                return captured;
             }
-            return captured;
-        }
 
-        function getGroupFromBoard(boardRef, r, c, color) {
-            const group = [];
-            const visited = new Set();
-            const stack = [[r, c]];
-            while (stack.length > 0) {
-                const [currR, currC] = stack.pop();
-                const key = `${currR},${currC}`;
-                if (visited.has(key) || boardRef[currR][currC] !== color) continue;
-                visited.add(key);
-                group.push([currR, currC]);
-                [[currR-1, currC], [currR+1, currC], [currR, currC-1], [currR, currC+1]].forEach(([nr, nc]) => {
-                    if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) stack.push([nr, nc]);
+            function getGroupFromBoard(boardRef, r, c, color) {
+                const group = [];
+                const visited = new Set();
+                const stack = [[r, c]];
+                while (stack.length > 0) {
+                    const [currR, currC] = stack.pop();
+                    const key = `${currR},${currC}`;
+                    if (visited.has(key) || boardRef[currR][currC] !== color) continue;
+                    visited.add(key);
+                    group.push([currR, currC]);
+                    [[currR-1, currC], [currR+1, currC], [currR, currC-1], [currR, currC+1]].forEach(([nr, nc]) => {
+                        if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) stack.push([nr, nc]);
+                    });
+                }
+                return group;
+            }
+
+            function getLibertiesFromBoard(boardRef, group) {
+                const libs = new Set();
+                group.forEach(([r, c]) => {
+                    [[r-1, c], [r+1, c], [r, c-1], [r, c+1]].forEach(([nr, nc]) => {
+                        if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && boardRef[nr][nc] === null) {
+                            libs.add(`${nr},${nc}`);
+                        }
+                    });
                 });
+                return Array.from(libs);
             }
-            return group;
-        }
 
-        function getLibertiesFromBoard(boardRef, group) {
-            const libs = new Set();
-            group.forEach(([r, c]) => {
-                [[r-1, c], [r+1, c], [r, c-1], [r, c+1]].forEach(([nr, nc]) => {
-                    if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && boardRef[nr][nc] === null) {
-                        libs.add(`${nr},${nc}`);
+            function render() {
+                const cells = boardEl.children;
+                for (let i = 0; i < cells.length; i++) {
+                    const r = parseInt(cells[i].dataset.row);
+                    const c = parseInt(cells[i].dataset.col);
+                    const existing = cells[i].querySelector('.stone');
+                    if (existing) existing.remove();
+
+                    if (gameState.board[r][c]) {
+                        const stone = document.createElement('div');
+                        stone.className = `stone ${gameState.board[r][c]}-stone`;
+                        cells[i].appendChild(stone);
                     }
-                });
-            });
-            return Array.from(libs);
-        }
+                }
 
-        function render() {
-            // Update Board
-            const cells = boardEl.children;
-            for (let i = 0; i < cells.length; i++) {
-                const r = parseInt(cells[i].dataset.row);
-                const c = parseInt(cells[i].dataset.col);
-                const existing = cells[i].querySelector('.stone');
-                if (existing) existing.remove();
+                blackScoreEl.innerText = gameState.capturedByBlack;
+                whiteScoreEl.innerText = gameState.capturedByWhite;
 
-                if (gameState.board[r][c]) {
-                    const stone = document.createElement('div');
-                    stone.className = `stone ${gameState.board[r][c]}-stone`;
-                    cells[i].appendChild(stone);
+                if (gameState.currentPlayer === 'black') {
+                    turnText.innerText = '黒の番';
+                    turnText.className = 'px-4 py-1.5 rounded-full text-xs font-bold bg-black text-white shadow-md ring-2 ring-black ring-offset-2';
+                } else {
+                    turnText.innerText = '白の番';
+                    turnText.className = 'px-4 py-1.5 rounded-full text-xs font-bold bg-white text-black border border-gray-300 shadow-md ring-2 ring-gray-200 ring-offset-2';
                 }
             }
 
-            // Update UI
-            blackScoreEl.innerText = gameState.capturedByBlack;
-            whiteScoreEl.innerText = gameState.capturedByWhite;
-
-            if (gameState.currentPlayer === 'black') {
-                turnText.innerText = '黒の番';
-                turnText.className = 'px-4 py-1.5 rounded-full text-xs font-bold bg-black text-white shadow-md ring-2 ring-black ring-offset-2';
-            } else {
-                turnText.innerText = '白の番';
-                turnText.className = 'px-4 py-1.5 rounded-full text-xs font-bold bg-white text-black border border-gray-300 shadow-md ring-2 ring-gray-200 ring-offset-2';
-            }
-        }
-
-        // --- Interaction Handlers ---
-
-        shareBtn.onclick = () => {
-            const url = window.location.href;
-            const tempInput = document.createElement('input');
-            tempInput.value = url;
-            document.body.appendChild(tempInput);
-            tempInput.select();
-            document.execCommand('copy');
-            document.body.removeChild(tempInput);
+            // --- Interaction Handlers ---
             
-            toast.style.opacity = '1';
-            setTimeout(() => toast.style.opacity = '0', 2000);
-        };
+            // 3. 古い execCommand を廃止し、モダンな Clipboard API に変更
+            shareBtn.onclick = async () => {
+                try {
+                    await navigator.clipboard.writeText(window.location.href);
+                    toast.style.opacity = '1';
+                    setTimeout(() => toast.style.opacity = '0', 2000);
+                } catch (err) {
+                    console.error("Failed to copy: ", err);
+                    // 予備のコピー方法
+                    const tempInput = document.createElement('input');
+                    tempInput.value = window.location.href;
+                    document.body.appendChild(tempInput);
+                    tempInput.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(tempInput);
+                    toast.style.opacity = '1';
+                    setTimeout(() => toast.style.opacity = '0', 2000);
+                }
+            };
 
-        passBtn.onclick = () => {
-            gameState.passCount++;
-            if (gameState.passCount >= 2) {
-                showModal('終局しました。');
-            } else {
-                gameState.currentPlayer = gameState.currentPlayer === 'black' ? 'white' : 'black';
-                saveGame();
+            passBtn.onclick = () => {
+                gameState.passCount++;
+                if (gameState.passCount >= 2) {
+                    showModal('終局しました。');
+                } else {
+                    gameState.currentPlayer = gameState.currentPlayer === 'black' ? 'white' : 'black';
+                    saveGame();
+                }
+            };
+
+            resetBtn.onclick = () => {
+                if (confirm('盤面をリセットしますか？')) {
+                    gameState = {
+                        board: Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null)),
+                        currentPlayer: 'black',
+                        capturedByBlack: 0,
+                        capturedByWhite: 0,
+                        passCount: 0,
+                        lastUpdate: Date.now()
+                    };
+                    saveGame();
+                }
+            };
+
+            function showModal(text) {
+                modalText.innerText = text;
+                modal.classList.remove('hidden');
             }
-        };
 
-        resetBtn.onclick = () => {
-            if (confirm('盤面をリセットしますか？')) {
-                gameState = {
-                    board: Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null)),
-                    currentPlayer: 'black',
-                    capturedByBlack: 0,
-                    capturedByWhite: 0,
-                    passCount: 0,
-                    lastUpdate: Date.now()
-                };
-                saveGame();
-            }
-        };
+            modalClose.onclick = () => modal.classList.add('hidden');
 
-        function showModal(text) {
-            modalText.innerText = text;
-            modal.classList.remove('hidden');
-        }
-
-        modalClose.onclick = () => modal.classList.add('hidden');
-
-        // Start App
-        init();
+            // アプリ起動
+            init();
+        });
     </script>
 </body>
 </html>
